@@ -1,0 +1,363 @@
+---
+title: "Estatística e Análise de Dados"
+author: "José Pinto, Nirbhaya Shaji"
+date: "16/06/2020"
+output:
+  html_document:
+    code_folding: hide
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Introduction
+
+This work has been performed to develop experience in dimensionality reduction methods, by first analyzing the data, then performing the dimensionality transformation and finally performing an in depth analysis and explanation of the results obtained.<br>
+
+## Goals
+
+Obtain practical and theoretical experience with dimensionality reduction methods in a real world dataset.<br>
+
+## Models
+
+In the work presented below we worked with several different methods.<br>
+The methods are principal component analysis (PCA), factorial analysis (FA) and Multidimensional scaling (MDS).<br>
+
+## Dataset
+
+The dataset we are going to work with is the 2019 "World Happiness Report" dataset available in Kaggle.<br>
+"https://www.kaggle.com/unsdsn/world-happiness/data" The dataset contains information about country, region<br>
+and several other variables used to calculate the happiness score.<br>
+
+The dataset is comprised of a total of 156 observations (rows/countries) and 9 variables (columns), 1 target and 8<br>
+predictors.<br>
+The variables are as follows:<br>
+
+Target variable:<br>
+<b>Score</b> - The happiness score obtained based on the other features (continuous value)<br>
+
+Predictor variables:<br>
+<b>Overall rank</b> - Rank of the country based on the Happiness Score. (integer value)<br>
+<b>Country or region</b> - Country the data belongs to (categorical value)<br>
+<b>GDP per capita</b>	- Gross domestic product per person (continuous value)<br>
+<b>Social support</b> - Amount of social support received (continuous value)<br>
+<b>Healthy life expectancy</b> -	Average life expectancy of individuals (continuous value))<br>
+<b>Freedom to make life choices</b> -	Amount of freedom to make choices (continuous value)<br>
+<b>Generosity</b> - Amount of generosity (continuous value)<br>
+<b>Perceptions of corruption</b> - Perceived amount of corruption in country (continuous value)<br>
+
+All the required libraries are imported here to more easily identify dependencies.<br>
+
+```{r libraries, message=FALSE, warning=FALSE}
+library(mlbench)
+library(class)
+library(GGally)
+library(magrittr)
+library(MASS)
+library(hmeasure)
+library(randomForest)
+library(reshape2)
+library(glmnet)
+library(ggplot2)
+library(reshape2)
+library(nnet)
+library(MLmetrics)
+library(MASS)
+library(tidyverse)
+library(CrossValidate)
+library(mclust)
+library(klaR)
+library(caret)
+library(dendextend)
+library(moments)
+library(FactoMineR)
+library(psych)
+library(car)
+library(ggpubr)
+```
+
+Due to the nature of the data "Country or region" will be removed.<br>
+
+Import the data and check variable types.<br>
+
+```{r dataset}
+WHR = read.csv("2019.csv")
+WHR = WHR[c(1,3:9)]
+str(WHR)
+```
+
+First entries of the data.<br>
+
+```{r head}
+head(WHR)
+```
+
+Summary of data position (minimum, maximum, mean, median, quartiles).<br>
+
+```{r positionSummary}
+summary(WHR)
+```
+
+The variables are all in slightly different scales, which indicates the need for normalization.<br>
+The mean and median of all variables are very similar which indicates no strong outliers.<br>
+
+Summary of data dispersion (range, inter quartile range, variance, standard distribution).<br>
+
+```{r dispertionSummary}
+dispertionSummary = WHR[c(),]
+for (column in colnames(dispertionSummary)){
+  #get min and max from column
+  columnExtremes = range(WHR[,column])
+  #get column range
+  dispertionSummary[1,column] = columnExtremes[2]-columnExtremes[1]
+  #get column inter quartile range
+  dispertionSummary[2,column] = IQR(WHR[,column])
+  #get column variance
+  dispertionSummary[3,column] = var(WHR[,column])
+  #get column standard deviation
+  dispertionSummary[4,column] = sd(WHR[,column])
+}
+#change row names to reflect the metrics
+rownames(dispertionSummary) = c("Range","Inter Quartile Range","Variation","Standard Deviation")
+dispertionSummary
+```
+
+The only new information that can be gathered is that overall rank has extremely high variation (and standard deviation). This would be expected due to its nature.<br>
+Otherwise all features are mostly proportional to the data ranges.<br>
+
+```{r targetSummary, fig.width=20, fig.height=10, message=FALSE}
+WHR %>% ggpairs(.);
+```
+
+From the above plots we can conclude that the first 5 features ("Overall rank", "Score", "GDP.per.capita", "Social.support" and "Healthy.life.expectancy") are highly correlated. As Overall rank is derived only from Score, this monotonous correlation was expected. It will nevertheless be interesting to observe its effects in the methods we will try.<br>
+
+## Skewness of the data
+
+From the histograms we can observe that "GDP.per.capita", "Social.support", "health.life.expectancy" and "Freedom.to.make.life.choices" are all right skewed, while "generosity" and "Perceptions.of.corruption" are left skewed and "Overall.rank" and "Score" are centered.<br>
+
+Based on Bulmer, M. G. 1979., “Overall.rank”, “Score” and “GDP.per.capita” can be considered "approximately symmetric" (skewness between -0.5 and + 0.5). Based on the same scale, “Healthy.life.expectancy” and “Freedom.to.make.life.choices” comes out as "moderately left skewed" (skewness between -1.0 and -0.5). Likewise, generosity becomes "moderately right skewed". “Social.support” and “Perceptions.of.corruption” are highly skewed to left and right respectively with |skewness| > 1.<br>
+
+```{r skewness}
+skewness(WHR)
+```
+
+## Kurtosis of data 
+
+The kurtosis of any univariate normal distribution is 3 (hence excess kurtosis exactly 0). Below we can see the Pearson Kurtosis of each of the columns.<br>
+
+"Overall.rank", "Score", and "GDP.per.capita" all have kurtosis much less than 3. Compared to a normal distribution, their tails are shorter, and the central peaks lower and broader.<br>
+
+"Healthy.life.expectancy" and  "Freedom.to.make.life.choices" have kurtosis of almost 3 , similar to a normal distribution.<br>
+
+"Social.support", "Generosity" and “Perceptions.of.corruption" all have kurtosis higher than 3. Compared to a normal distribution, their tails are longer and central peak higher and sharper.<br>
+
+
+```{r kurtosis}
+#get kurtosis values
+kurtosis(WHR)
+```
+
+Boxplots of data.<br>
+
+```{r histBox, message=FALSE, warning=FALSE}
+data = melt(WHR)
+ggplot(data, aes(factor(variable), value)) +
+  geom_boxplot() + facet_wrap(~variable, scale="free") +
+  theme(axis.title.x=element_blank(),
+        axis.text.x=element_blank(),
+        axis.ticks.x=element_blank())
+```
+
+From the boxplots we confirm what we saw in the previous histograms, skewedness and kurtosis values.  We also see that for "Social.support", "Generosity" and "Perceptions.of.corruption" most of the skewedness comes from outliers.<br>
+
+```{r seed}
+#set the seed so we can replicate results
+set.seed(123)
+```
+
+# Expectation Maximization for Mixture Distributions - EMMD
+
+We will now use EMMD to verify any natural clusters in our data and to further our understanding.<br>
+
+```{r EMMD, results="hide", message=FALSE, warning=FALSE}
+#create a EMMD model with automatically picked number of clusters
+EMMDModel = Mclust(WHR)
+#visualize clusters
+pairs(WHR,col = EMMDModel$classification)
+par(xpd=TRUE)
+legend(-0.11,1.24,legend=sort(unique(EMMDModel$classification)),col=1:4, pch=1, horiz=TRUE, box.lty=0)
+```
+
+The learned model selected 4 cluster. One of them represents the countries with high scores, the second with average scores. The third and fourth one are harder to understand, however, these seem to mostly split data by "Freedom.to.make.life.choices". As such, the first two clusters are selected based on the first few features, while the last 2 based on "Freedom.to.make.life.choices".<br>
+
+# Principle Component Analysis - PCA 
+
+## Which are the variables that are highly correlated?
+
+PCs are linear combinations of the original variables with mean = 0 (centered data).<br>
+PCs must be non-correlated, and they should have the maximum possible variance (dispersion among the instances should be as high as possible). Looking at the correlations, although, not all correlations are very high, some high correlations do exist. Therefore PCA can make sense on our data.<br>
+
+```{r correlations}
+print(cor(WHR))
+```
+
+## Normed or Non normed PCA?
+
+So, as to balance the importance of the variables, we have to consider them in their standardized values and therefore apply the PCA in its norm form i.e. Normed PCA.<br>
+
+Below is the representation of the individual standardized data in a Cartesian graph for the first two principal components.<br>
+
+```{r scale}
+#scale the data
+scaled_WHR <- scale(WHR)
+#obatin principal components and plot summary of first two components
+PCA_WHR <- PCA(scaled_WHR)
+#get eigen vectors
+PCA_WHR$svd$V
+```
+
+Looking into the Eigen vectors of the correlation matrix (since we are doing Normed PCA), we obtained 8 eigen vectors, one for each of the 8 involved variables. Because the eigen vectors are, by construction, orthogonal, the inner product is 0 and, as such, it follows that the principle components are not correlated.<br>
+
+As we saw in the eigen vectors, the first PC has stronger positive weights for the "Score", "GDP.per.capita", "Social.support", and "Healthy.life.expectancy". It also shows similar but negative weights on "Overall.rank" and "Score". So, we can infer that countries with high ranks (20, 24, 18, etc.), which have high positive values in the first PC will be countries with high values for "GDP.per.capita", "Social.support", and "Healthy.life.expectancy". On the other hand, low ranking countries (154, 156, 151, etc.), very negative values in first PC.<br>
+
+Looking into the second PC, we can observe that it has higher coefficients for "Generosity", "Freedom.to.make.life.choices" and "Perceptions.of.corruption". This is probably the case for the highest ranked countries (ranked 1, 2, 3, 4, 5, etc.). So, in the first quadrant where the countries with highest influence from PC1 and PC2 are, we have the top ranked countries. This makes sense, given the nature of the data, which is world happiness index. Also, its interesting to note that how our PCs separately identified two different categories that would result in happiness. The more objective ones came in PC1, while, the more subjective aspects of human happiness were caught by PC2.<br>
+
+## Choosing the components
+
+Now we will look at what amount of dispersion to keep/discard, therefore, the number of components to analyze.<br>
+
+```{r componentSelection}
+#eigen value summary
+PCA_WHR$eig
+#plot eigenvalue importance
+barplot(PCA_WHR$eig[,1], main = "Eigenvalues", names.arg=1:nrow(PCA_WHR$eig))
+```
+
+##Which metric to consider? Pearson, Cattell or Kaiser?<br>
+
+<b>Kaiser criteria</b> states that we should keep eigen values greater than 1. Given this, we keep the first and second components, accounting for 77% of the total variance.<br>
+<b>Pearson’s criteria</b> indicates that we should keep the minimum number of components accounting for at least 80% of the variance. Meaning we keep the first, second and third components,.<br>
+<b>Cattel criteria</b>: elbow rule on the bar plot of eigen value -> we keep PC 1 and PC 2.<br>
+
+Given that two out of the three of the rules agree on keeping two components, that is what we will do.<br>
+
+# Factor Analysis - FA
+
+We will start by looking at the correlation values.<br>
+
+```{r FACor, warning=FALSE}
+WHRCor = cor(WHR)
+WHRCor
+```
+
+We can see that there is a broad distribution of the correlations, with some quite high and some quite low. This does not however, indicate that factor analysis would be incorrect in this case.<br>
+
+Now we will look at the KMO (Kaiser-Meyer-Olkin factor adequacy) to verify our suppositions about the FA adequacy for this dataset.<br>
+
+```{r FAKMO, warning=FALSE}
+KMO(WHRCor)
+```
+
+We confirm our expectations of the data being adequate but not exceedingly so, with a relatively average KMO value. None of the values are very close to 0.5, with the closest being "Generosity", with a value of 0.6 and the furthest ones being "Social.support", "Healthy.life.expectancy" and "Freedom.to.make.life.choices", all with the value of 0.91.<br>
+This, as such, indicates that not only is our data appropriate, but so is, every single variable.<br>
+
+Given that our data is appropriate for FA, we shall now obtain the factors.<br>
+We have chosen a 4 factor model, as this amount seemed to give good results.<br>
+First, we will look at the communalities.<br>
+
+```{r FACommunality, warning=FALSE}
+WHRPC = principal(WHRCor,4,rotate = "varimax")
+WHRPC$communality
+```
+
+we can see that the values are relatively high, for instance our 4 factor model explains 90.8% of the total variability of variable "Overal.rank" and as much as 99.8% of the variability of "Generosity". With the lowest value being 80% for "Social.support".<br>
+Going to a lower amount of factors only explained the variability at 60% for some variables.<br>
+
+The factor loadings are presented below.<br>
+
+```{r FALoadings, warning=FALSE}
+WHRPC$loadings
+```
+
+The values shown above are the rotated components. These, tend to keep a single high correlation for each feature, while maintaining others at 0 or close to it.<br>
+We notice that the first rotated component has a high correlation with the variables "Overall.rank", "Score", "GDP.per.capita", "Social.support" and "Healthy.life.expectancy", therefore, the first common factor represents positive state specific features, such as economic power which lead the higher GDP, Social campaigns, that lead to better social support and Healthcare availability that leads to better life expectancy.<br>
+The second rotated component has high correlation with "Freedom.to.make.life.choices", representing  the freedoms in the particular country.<br>
+The third one has high correlation with "Perceptions.of.corruption", which represents the views of the populai«tion on the government. It is, although only slightly, positively correlated with the other "positive" aspects, which might leave us to believe, that people living in better conditions are more aware of the functioning of the government than those in poorer conditions.<br>
+The fourth and last component is correlated with "Generosity", representing, as such, the view of the population on itself.<br>
+We can also notice, that because we applied varimax rotation, each original variable has just a high correlation/loading, with one of the factors, with the other relatively low.<br>
+
+We can also see the sums of squares of the loadings, "SS loadings". If we had not performed varimax rotation these would be the eigen values, however, since we did, these are not.<br>
+We also have the proportion of variability that each one explains and the cumulative variability they explain. The 4 together explain 91.2% of the variability. The same as the 4 principal components before rotation.<br>
+
+Underneath we present the residual correlations of the factor analysis.<br>
+
+```{r FAResiduals, warning=FALSE}
+WHRPC$residual
+```
+
+We can see above the residual correlations, not explained by our factors. AS we can see all residuals are very low, which means we captured almost all information.<br>
+
+
+# Multidimensional scaling - MDS
+
+Since all of our variables are quantitative data, we are using metric or classical multidimensional scaling which preserves the original distance metric, between points, as well as possible to visualize the similarity/dissimilarity between samples by plotting points in two dimensional plots.
+
+Below, first we use cmdscale() from stats package to compute classical (metric) multidimensional scaling into a 2-dimentional plot. We use our data without the Overall.rank and Score column to know how well MDS can find the similarity/dissimilarity based on the predictor variables.
+
+```{r, warning=FALSE}
+# compute MDS
+mds <- WHR[,-c(1,2)] %>% dist() %>% cmdscale() %>% as_tibble()
+colnames(mds) <- c("Dim.1", "Dim.2")
+# plot MDS
+ggscatter(mds, x = "Dim.1", y = "Dim.2", 
+          label = rownames(WHR),
+          size = 1,
+          repel = TRUE)
+```
+
+
+We can observe that the Dim 1 captures the ranking of the countries quite well, since it separates the low ranked to the high ranked countries along its axis. Also Dim.2 fairly well reflects a differentiation between low to high rankings.  We also tried performing k-means clustering to see if there is any clustering pattern in the way the instances are mapped by MDS. 
+
+
+```{r, warning=FALSE}
+# K-means clustering
+clust <- kmeans(mds,5)$cluster %>% as.factor()
+mds <- mds %>% mutate(groups = clust)
+# Plot and color by groups
+ggscatter(mds, x = "Dim.1", y = "Dim.2", 
+          label = rownames(WHR),
+          color = "groups",
+          palette = "Tron Legacy",
+          size = 1, 
+          ellipse = TRUE,
+          ellipse.type = "convex",
+          repel = TRUE)
+
+```
+
+For 5 cluster k means we were able to see a very good separation among the data points. For the highest and the lowest ranked countries Dim.1 seems to carry more weight in grouping, but for the countries with rank in between, Dim.2 also has made some distinction in the countries. On increasing the number of clusters furthermore stratified clusters where able to find along both the axis.  
+
+
+## Results
+
+Overall we can see that the first 5 variables "Overall.rank", "Score", "GDP.per.capita", "Social.support" and "Healthy.life.expectancy" are well represented and have similar values in both PCA and FA. This is due to the high correlation between both.<br>
+While we also notice that the remaining variables are represented mostly individually in each component, due to the low mutual correlation.<br>
+For PCA 2/3 components were required for good results, while for FA 4 were required. This indicates a better fit of PCA for this dataset.<br>
+Nevertheless, we are capable of representing almost all information in a much smaller amount of variables/dimensions, which allows better interpretation, visualization, and would highly help machine learning models.<br>
+Another important factor that was noticed for this dataset, is that although FA suggests more components, due to the transformations, these are far more interpretable.<br>
+
+## Conclusions
+
+Multivariate data analysis methods have shown their usefulness by allowing us to perform several difficult operations in an efficient manner.<br>
+First, they allow us to perform data dimensionality reduction that is useful for visualization and modeling purposes.<br>
+Second, they help us describe and understand complex data distributions and variable relationships.<br>
+They are an important addition to the set of statistical models, complementing univariate and bivariate analysis methods.<br>
+FA is more useful for understanding purposes, by making extra transformations to the data.<br>
+While PCA is more useful for passing data into machine learning methods or further processing, as it lacks the extra transformations, it is slightly faster to compute for large datasets.<br>
+Meanwhile MDS, provides a better visualization regarding the distance/dissimilarity among the data points. 
+
+The general usage and usefulness of this methods could also be found on the existence of a variety of simple and easy to use libraries and functions, which allow the usage of these methods to be extremely simple, and very little time consuming.<br>
+
+In general, multivariate analyses, such as the ones used, should comprise an integral part of any statistical analysis or machine learning pipeline, allowing the extraction of a lot of information, by a relatively simple and effective method.<br>
